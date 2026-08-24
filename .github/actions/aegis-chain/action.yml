@@ -1,0 +1,120 @@
+name: "Aegis Chain"
+description:
+  "Dependency impact report for Rust workspaces. Builds base/head snapshots via git worktrees,
+  evaluates policy, posts an idempotent PR comment, and fails per --fail-on."
+
+inputs:
+  base-ref:
+    description: "Git revision used as the dependency baseline"
+    required: true
+  head-ref:
+    description: "Git revision to analyze; defaults to the current checkout"
+    required: false
+  policy:
+    description: "Path to the aegis.yml policy file"
+    required: false
+    default: ""
+  fail-on:
+    description: "Fail the job when overall status reaches this severity (never|warn|block)"
+    required: false
+    default: "never"
+  comment:
+    description: "Post or update the PR report comment"
+    required: false
+    default: "false"
+  pr-number:
+    description: "Pull request number for the report comment"
+    required: false
+  repo:
+    description: "Repository as owner/name; defaults to GITHUB_REPOSITORY"
+    required: false
+  github-token:
+    description: "Token used for posting the PR comment"
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  status:
+    description: "Overall policy status (pass/warn/block) or empty when no policy"
+    value: ${{ steps.diff.outputs.status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install aegis
+      shell: bash
+      run: |
+        cargo install --path "${{ github.action_path }}/../../.." --bin aegis --root "$RUNNER_TEMP/aegis-bin" --locked
+        echo "$RUNNER_TEMP/aegis-bin/bin" >> "$GITHUB_PATH"
+
+    - name: Create base worktree
+      shell: bash
+      run: |
+        git worktree add --detach "$RUNNER_TEMP/aegis-base" "${{ inputs.base-ref }}"
+
+    - name: Snapshot base dependencies
+      shell: bash
+      run: |
+        aegis snapshot \
+          --manifest-path "$RUNNER_TEMP/aegis-base/Cargo.toml" \
+          --output "$RUNNER_TEMP/aegis-base.json"
+
+    - name: Checkout head worktree
+      if: ${{ inputs.head-ref != '' }}
+      shell: bash
+      run: |
+        git worktree add --detach "$RUNNER_TEMP/aegis-head" "${{ inputs.head-ref }}"
+        echo "AEGIS_HEAD_MANIFEST=$RUNNER_TEMP/aegis-head/Cargo.toml" >> "$GITHUB_ENV"
+
+    - name: Resolve head manifest
+      if: ${{ inputs.head-ref == '' }}
+      shell: bash
+      run: |
+        echo "AEGIS_HEAD_MANIFEST=${{ github.workspace }}/Cargo.toml" >> "$GITHUB_ENV"
+
+    - name: Snapshot head dependencies
+      shell: bash
+      run: |
+        aegis snapshot \
+          --manifest-path "$AEGIS_HEAD_MANIFEST" \
+          --output "$RUNNER_TEMP/aegis-head.json"
+
+    - name: Run diff and evaluate policy
+      id: diff
+      shell: bash
+      env:
+        AEGIS_POLICY: ${{ inputs.policy }}
+        AEGIS_FAIL_ON: ${{ inputs.fail-on }}
+        AEGIS_COMMENT: ${{ inputs.comment }}
+        AEGIS_PR_NUMBER: ${{ inputs.pr-number }}
+        AEGIS_REPO: ${{ inputs.repo }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        ARGS=(diff \
+          --base-snapshot "$RUNNER_TEMP/aegis-base.json" \
+          --head-snapshot "$RUNNER_TEMP/aegis-head.json")
+
+        if [ -n "$AEGIS_POLICY" ]; then
+          ARGS+=(--policy "$AEGIS_POLICY")
+        fi
+
+        case "$AEGIS_FAIL_ON" in
+          never) ;;
+          warn)  ARGS+=(--fail-on warn) ;;
+          block) ARGS+=(--fail-on block) ;;
+          *) echo "::error::invalid fail-on value: $AEGIS_FAIL_ON"; exit 2 ;;
+        esac
+
+        if [ "$(echo "$AEGIS_COMMENT" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+          [ -n "$AEGIS_PR_NUMBER" ] || { echo "::error::comment=true requires pr-number"; exit 2; }
+          ARGS+=(--comment --pr-number "$AEGIS_PR_NUMBER")
+          if [ -n "$AEGIS_REPO" ]; then
+            ARGS+=(--repo "$AEGIS_REPO")
+          fi
+        fi
+
+        set +e
+        aegis "${ARGS[@]}"
+        code=$?
+        set -e
+        exit $code

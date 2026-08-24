@@ -1,0 +1,18 @@
+[package]
+name = "aegis-core"
+description = "Domain model and pipeline orchestration for Aegis Chain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+aegis-graph.workspace = true
+aegis-policy.workspace = true
+semver = { version = "1.0", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "aegis-cargo"
+description = "cargo metadata adapter and dependency snapshots for Aegis Chain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+aegis-core.workspace = true
+cargo_metadata.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

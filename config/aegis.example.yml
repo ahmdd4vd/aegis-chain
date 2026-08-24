@@ -1,0 +1,47 @@
+schema_version: 1
+
+analysis:
+  mode: offline
+  include_dev_dependencies: false
+  include_build_dependencies: true
+  max_paths_per_change: 5
+
+critical_packages:
+  - api-gateway
+  - payment-worker
+
+evidence:
+  require_for_added_packages:
+    - sbom
+  require_for_critical_path:
+    - sbom
+    - provenance
+
+thresholds:
+  warn_at: 30
+  high_at: 60
+  block_at: 80
+
+rules:
+  - id: critical-new-package-needs-sbom
+    when:
+      all:
+        - is_added: true
+        - touches_critical: true
+        - missing_evidence: sbom
+    action: block
+    message: "New package reaches a critical path but no SBOM was found."
+
+  - id: source-mutation-review
+    when:
+      any:
+        - source_changed: true
+        - is_major_upgrade: true
+    action: warn
+    message: "Source change or major upgrade requires maintainer review."
+
+  - id: risk-threshold
+    when:
+      risk_at_least: 80
+    action: block
+    message: "Risk score passed the block threshold."

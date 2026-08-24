@@ -1,0 +1,16 @@
+[package]
+name = "aegis-policy"
+description = "Policy schema, evaluation, and risk scoring for Aegis Chain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = { workspace = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -1,0 +1,9 @@
+[package]
+name = "basic-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+basic-lib = { path = "../lib-a" }
+semver = "1"
+unicode-width = "0.2"

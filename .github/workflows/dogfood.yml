@@ -1,0 +1,56 @@
+name: Dogfood
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "config/aegis.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  self-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Aegis from this checkout
+        run: cargo install --path crates/aegis-cli --bin aegis --root "$RUNNER_TEMP/aegis-bin" --locked
+
+      - name: Add aegis to PATH
+        run: echo "$RUNNER_TEMP/aegis-bin/bin" >> "$GITHUB_PATH"
+
+      - name: Snapshot base dependencies
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/aegis-base" "${{ github.event.pull_request.base.sha }}"
+          aegis snapshot \
+            --manifest-path "$RUNNER_TEMP/aegis-base/Cargo.toml" \
+            --output "$RUNNER_TEMP/aegis-base.json"
+
+      - name: Snapshot head dependencies
+        run: |
+          aegis snapshot \
+            --manifest-path "${{ github.workspace }}/Cargo.toml" \
+            --output "$RUNNER_TEMP/aegis-head.json"
+
+      - name: Dependency impact report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          aegis diff \
+            --base-snapshot "$RUNNER_TEMP/aegis-base.json" \
+            --head-snapshot "$RUNNER_TEMP/aegis-head.json" \
+            --policy config/aegis.yml \
+            --comment --pr-number "${{ github.event.pull_request.number }}" \
+            --fail-on block

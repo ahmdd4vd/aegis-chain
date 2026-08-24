@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aegis-cargo",
+    "crates/aegis-cli",
+    "crates/aegis-core",
+    "crates/aegis-evidence",
+    "crates/aegis-github",
+    "crates/aegis-graph",
+    "crates/aegis-policy",
+    "crates/aegis-report",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Aegis Chain contributors"]
+repository = "https://github.com/ahmdd4vd/aegis-chain"
+
+[workspace.dependencies]
+aegis-cargo = { path = "crates/aegis-cargo" }
+aegis-core = { path = "crates/aegis-core" }
+aegis-evidence = { path = "crates/aegis-evidence" }
+aegis-github = { path = "crates/aegis-github" }
+aegis-graph = { path = "crates/aegis-graph" }
+aegis-policy = { path = "crates/aegis-policy" }
+aegis-report = { path = "crates/aegis-report" }
+
+clap = { version = "4.5", features = ["derive"] }
+cargo_metadata = "0.23"
+miette = { version = "7.4", features = ["fancy"] }
+mockito = "1"
+proptest = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+semver = { version = "1.0", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
