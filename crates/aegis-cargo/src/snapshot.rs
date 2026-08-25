@@ -167,14 +167,20 @@ mod tests {
 
     #[test]
     fn manifest_path_inside_workspace_is_relativized() {
-        let path = relative_manifest_path("C:\\ws\\app\\Cargo.toml", "C:\\ws");
-        assert_eq!(path, "app/Cargo.toml");
+        let sep = std::path::MAIN_SEPARATOR_STR;
+        let manifest = format!("C:{sep}ws{sep}app{sep}Cargo.toml");
+        let root = format!("C:{sep}ws");
+        let path = relative_manifest_path(&manifest, &root);
+        assert_eq!(path, normalize_separators(&format!("app{sep}Cargo.toml")));
     }
 
     #[test]
     fn manifest_path_outside_workspace_stays_absolute() {
-        let path = relative_manifest_path("D:\\other\\Cargo.toml", "C:\\ws");
-        assert_eq!(path, "D:/other/Cargo.toml");
+        let sep = std::path::MAIN_SEPARATOR_STR;
+        let manifest = format!("D:{sep}other{sep}Cargo.toml");
+        let root = format!("C:{sep}ws");
+        let path = relative_manifest_path(&manifest, &root);
+        assert_eq!(path, normalize_separators(&manifest));
     }
 
     #[test]
