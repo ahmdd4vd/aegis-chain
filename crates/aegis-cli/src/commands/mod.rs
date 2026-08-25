@@ -61,6 +61,7 @@ pub enum OutputFormat {
     Json,
     Markdown,
     Sarif,
+    Html,
 }
 
 pub fn init_tracing() {

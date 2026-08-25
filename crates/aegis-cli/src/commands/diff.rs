@@ -1,10 +1,14 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use aegis_advisory::OsvSource;
+use aegis_core::advisory::AdvisorySource;
 use aegis_core::decision::DecisionReport;
 use aegis_core::model::DependencySnapshot;
+use aegis_core::provenance::ProvenanceSource;
 use aegis_core::run_decision;
 use aegis_policy::{Action, EvidenceAvailability, EvidenceKind};
+use aegis_sigstore::CosignProvenanceProvider;
 use clap::{Args, ValueEnum};
 
 use super::{read_utf8, OutputFormat};
@@ -57,6 +61,18 @@ pub struct DiffArgs {
         help = "CycloneDX SBOM JSON files used as real evidence for matched packages"
     )]
     pub sbom: Vec<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Query the OSV.dev advisory database and feed findings into the risk score (network opt-in)"
+    )]
+    pub advisory: bool,
+
+    #[arg(
+        long,
+        help = "Directory of Sigstore/cosign bundle files ({name}@{version}.json) used to verify build provenance (offline)"
+    )]
+    pub provenance: Option<PathBuf>,
 
     #[arg(long, value_enum, default_value_t = OutputFormat::Terminal)]
     pub format: OutputFormat,
@@ -117,6 +133,8 @@ fn parse_evidence_specs(specs: &[String]) -> miette::Result<EvidenceAvailability
                 "provenance" => EvidenceKind::Provenance,
                 "approved_source" => EvidenceKind::ApprovedSource,
                 "vulnerability_feed" => EvidenceKind::VulnerabilityFeed,
+                "hashes" => EvidenceKind::Hashes,
+                "license" => EvidenceKind::License,
                 other => {
                     return Err(miette::Report::msg(format!(
                         "unknown evidence kind '{other}' in spec '{spec}'"
@@ -209,13 +227,30 @@ pub fn run(args: &DiffArgs) -> miette::Result<()> {
             evidence.entry(package).or_default().extend(kinds);
         }
     }
-    let report = run_decision(&base, &head, policy.as_ref(), &evidence);
+    let osv = args.advisory.then(OsvSource::new);
+    let advisory: Option<&dyn AdvisorySource> =
+        osv.as_ref().map(|source| source as &dyn AdvisorySource);
+
+    let provenance_source = args.provenance.clone().map(CosignProvenanceProvider::new);
+    let provenance: Option<&dyn ProvenanceSource> = provenance_source
+        .as_ref()
+        .map(|source| source as &dyn ProvenanceSource);
+
+    let report = run_decision(
+        &base,
+        &head,
+        policy.as_ref(),
+        &evidence,
+        advisory,
+        provenance,
+    );
 
     let rendered = match args.format {
         OutputFormat::Terminal => aegis_report::terminal::render(&report),
         OutputFormat::Json => aegis_report::json::render(&report),
         OutputFormat::Markdown => aegis_report::markdown::render(&report),
         OutputFormat::Sarif => aegis_report::sarif::render(&report),
+        OutputFormat::Html => aegis_report::html::render(&report),
     };
 
     write_or_print(args.output.as_deref(), &rendered)?;

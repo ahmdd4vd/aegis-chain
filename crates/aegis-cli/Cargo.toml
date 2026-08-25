@@ -14,10 +14,12 @@ path = "src/main.rs"
 [dependencies]
 aegis-core.workspace = true
 aegis-cargo.workspace = true
+aegis-advisory.workspace = true
 aegis-evidence.workspace = true
 aegis-github.workspace = true
 aegis-policy.workspace = true
 aegis-report.workspace = true
+aegis-sigstore.workspace = true
 clap.workspace = true
 miette.workspace = true
 serde_json.workspace = true

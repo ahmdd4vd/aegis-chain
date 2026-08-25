@@ -1,0 +1,76 @@
+# Aegis Chain — reusable GitLab CI job template
+#
+# Compares the base (target branch) and head dependency snapshots of a Rust
+# workspace, evaluates the policy, and posts the Markdown report as an
+# idempotent merge-request note. Fail the job per AEGIS_FAIL_ON.
+#
+# Usage in your .gitlab-ci.yml:
+#
+#   include:
+#     - local: '.gitlab/aegis-chain.yml'
+#
+#   aegis_chain:
+#     extends: .aegis_chain
+#     variables:
+#       AEGIS_FAIL_ON: block        # never | warn | block
+#       AEGIS_POLICY: aegis.yml     # optional
+#
+# Requirements: a Rust toolchain (the job installs the `aegis` binary from the
+# repo) and a CI job token with API access to the merge request (default).
+
+.aegis_chain:
+  image: rust:latest
+  stage: test
+  variables:
+    AEGIS_FAIL_ON: never
+    AEGIS_POLICY: ""
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - cargo install --path . --bin aegis --locked
+
+    - |
+      BASE_SHA="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-${CI_COMMIT_BRANCH}~1}"
+      git worktree add --detach "$CI_BUILDS_DIR/aegis-base" "$BASE_SHA"
+      aegis snapshot \
+        --manifest-path "$CI_BUILDS_DIR/aegis-base/Cargo.toml" \
+        --output "$CI_BUILDS_DIR/aegis-base.json"
+      aegis snapshot \
+        --manifest-path "Cargo.toml" \
+        --output "$CI_BUILDS_DIR/aegis-head.json"
+
+    - |
+      set +e
+      ARGS="diff --base-snapshot $CI_BUILDS_DIR/aegis-base.json --head-snapshot $CI_BUILDS_DIR/aegis-head.json --format markdown"
+      if [ -n "$AEGIS_POLICY" ]; then
+        ARGS="$ARGS --policy $AEGIS_POLICY"
+      fi
+      case "$AEGIS_FAIL_ON" in
+        never) ;;
+        warn)  ARGS="$ARGS --fail-on warn" ;;
+        block) ARGS="$ARGS --fail-on block" ;;
+        *) echo "::error::invalid AEGIS_FAIL_ON: $AEGIS_FAIL_ON"; exit 2 ;;
+      esac
+      aegis $ARGS > "$CI_BUILDS_DIR/aegis-report.md"
+      CODE=$?
+      set -e
+
+    - |
+      # Post or update the merge-request note (idempotent by marker comment).
+      if [ -n "$CI_MERGE_REQUEST_IID" ]; then
+        MARKER="<!-- aegis-chain:report:v1 -->"
+        NOTES_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+        BODY_FILE="$CI_BUILDS_DIR/aegis-report.md"
+        EXISTING=$(curl -s --fail-with-body --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+          "$NOTES_URL?per_page=100" \
+          | python3 -c "import sys,json; notes=json.load(sys.stdin); m=[n['id'] for n in notes if '$MARKER' in (n.get('body') or '')]; print(m[0] if m else '')" 2>/dev/null || true)
+        if [ -n "$EXISTING" ]; then
+          curl -s -X PUT --fail-with-body --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+            --data-urlencode "body@${BODY_FILE}" "$NOTES_URL/$EXISTING" >/dev/null
+        else
+          curl -s -X POST --fail-with-body --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+            --data-urlencode "body@${BODY_FILE}" "$NOTES_URL" >/dev/null
+        fi
+      fi
+
+    - exit $CODE

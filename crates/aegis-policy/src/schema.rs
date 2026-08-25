@@ -77,4 +77,6 @@ pub enum EvidenceKind {
     Provenance,
     ApprovedSource,
     VulnerabilityFeed,
+    Hashes,
+    License,
 }

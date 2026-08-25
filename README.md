@@ -43,7 +43,7 @@ snapshot(base) ──┐
 snapshot(head) ──┘                     │                            │
                               reverse BFS + paths          pass / warn / block
                                                                   │
-                                              terminal · markdown · json · sarif
+                                               terminal · markdown · json · sarif · html
 ```
 
 | Stage | What it does |
@@ -53,7 +53,7 @@ snapshot(head) ──┘                     │                            │
 | Impact | Reverse-BFS finds every workspace root that can reach a changed package, with up to five deterministic shortest paths. |
 | Score | Transparent weighted formula — magnitude, breadth, proximity, criticality, evidence gap, findings — no hidden magic numbers. |
 | Policy | Strict YAML rules (`all`/`any`/`not` plus predicates) evaluated into an auditable trace; decisions are `pass`, `warn`, or `block`. |
-| Evidence | CycloneDX SBOM presence checks close evidence gaps before rules fire. |
+| Evidence | CycloneDX SBOM (and optional `hashes`/`license`), OSV.dev advisory findings, and Sigstore/cosign provenance close evidence gaps before rules fire. |
 
 Every `warn` or `block` ships with its rule id, predicate trace, and graph
 path — reviewers see *why*, not just a number.
@@ -81,9 +81,20 @@ aegis diff \
   --head-snapshot head.json \
   --policy aegis.yml \
   --sbom sbom/bom.json \
+  --advisory \
+  --provenance ./sigstore-bundles \
   --format markdown \
   --sarif report.sarif
 ```
+
+Optional, opt-in enrichments (both respect the local-first principle — nothing
+leaves the runner unless you pass the flag):
+
+- `--advisory` queries the [OSV.dev](https://osv.dev) database for the
+  `crates.io` ecosystem and feeds any findings into the risk score.
+- `--provenance <DIR>` verifies a Sigstore/cosign bundle
+  (`{name}@{version}.json`) per package from `DIR` and marks provenance as
+  satisfied evidence, lowering the risk score.
 
 Bootstrap and validate a policy:
 
@@ -172,7 +183,7 @@ See `config/aegis.example.yml` for a complete reference and
 ## Use as a GitHub Action
 
 ```yaml
-- uses: ahmdd4vd/aegis-chain/.github/actions/aegis-chain@v0.1.0
+- uses: ahmdd4vd/aegis-chain/.github/actions/aegis-chain@v0.2.0
   with:
     base-ref: ${{ github.event.pull_request.base.sha }}
     policy: aegis.yml
@@ -192,6 +203,27 @@ This repository dogfoods itself with the same flow — see
 
 ---
 
+## Use as a GitLab CI job
+
+Include the reusable job template and extend it in your `.gitlab-ci.yml`:
+
+```yaml
+include:
+  - local: '.gitlab/aegis-chain.yml'
+
+aegis_chain:
+  extends: .aegis_chain
+  variables:
+    AEGIS_FAIL_ON: block      # never | warn | block
+    AEGIS_POLICY: aegis.yml   # optional
+```
+
+The template snapshots the base (target branch) and head, evaluates the
+policy, and posts the Markdown report as an **idempotent merge-request note**
+(marker `<!-- aegis-chain:report:v1 -->`).
+
+---
+
 ## Repository layout
 
 | Crate | Responsibility |
@@ -202,7 +234,9 @@ This repository dogfoods itself with the same flow — see
 | `aegis-graph` | Generic directed graph and reverse-BFS impact analysis |
 | `aegis-policy` | Policy schema, evaluator, transparent risk scoring |
 | `aegis-evidence` | CycloneDX SBOM evidence provider |
-| `aegis-report` | Terminal, Markdown, JSON, and SARIF renderers |
+| `aegis-advisory` | OSV.dev advisory provider (feeds risk findings) |
+| `aegis-sigstore` | Sigstore/cosign provenance verification provider |
+| `aegis-report` | Terminal, Markdown, JSON, SARIF, and HTML renderers |
 | `aegis-github` | Idempotent PR comment client |
 
 Dependency rule: domain crates never depend on `aegis-cli` or `aegis-github`.

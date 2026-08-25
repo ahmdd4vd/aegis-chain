@@ -43,3 +43,58 @@ fn tolerates_utf8_bom_prefix() {
     let availability = availability_from_bom_content(&with_bom).expect("bom with BOM parses");
     assert!(availability.contains_key("semver"));
 }
+
+#[test]
+fn maps_evidence_by_cargo_purl_when_name_absent() {
+    let bom = r#"{
+      "components": [
+        { "type": "library", "purl": "pkg:cargo/serde@1.0.210" }
+      ]
+    }"#;
+    let availability = availability_from_bom_content(bom).expect("bom parses");
+    let serde = availability.get("serde").expect("serde resolved from purl");
+    assert!(serde.contains(&EvidenceKind::Sbom));
+}
+
+#[test]
+fn maps_hashes_and_license_evidence() {
+    let bom = r#"{
+      "components": [
+        {
+          "type": "library",
+          "name": "cached",
+          "version": "0.51.0",
+          "purl": "pkg:cargo/cached@0.51.0",
+          "hashes": [ { "alg": "SHA-256", "content": "abc123" } ],
+          "licenses": [ { "license": { "id": "MIT" } } ]
+        }
+      ]
+    }"#;
+    let availability = availability_from_bom_content(bom).expect("bom parses");
+    let cached = availability.get("cached").expect("cached present");
+    assert!(cached.contains(&EvidenceKind::Sbom));
+    assert!(cached.contains(&EvidenceKind::Hashes));
+    assert!(cached.contains(&EvidenceKind::License));
+}
+
+#[test]
+fn non_cargo_purl_falls_back_to_name() {
+    let bom = r#"{
+      "components": [
+        { "type": "library", "name": "lodash", "version": "4.17.21", "purl": "pkg:npm/lodash@4.17.21" }
+      ]
+    }"#;
+    let availability = availability_from_bom_content(bom).expect("bom parses");
+    assert!(
+        availability.contains_key("lodash"),
+        "non-cargo purl should fall back to name"
+    );
+    assert!(!availability.contains_key("lodash@4.17.21"));
+}
+
+#[test]
+fn cargo_purl_with_qualifiers_resolves_name() {
+    let bom = r#"{ "components": [ { "type": "library", "purl": "pkg:cargo/serde@1.0.210?arch=x86_64" } ] }"#;
+    let availability = availability_from_bom_content(bom).expect("bom parses");
+    assert!(availability.contains_key("serde"));
+}

@@ -1,0 +1,20 @@
+[package]
+name = "aegis-sigstore"
+version.workspace = true
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+aegis-core = { path = "../aegis-core" }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+p256 = { version = "0.13", features = ["ecdsa"] }
+ecdsa = "0.16"
+x509-cert = "0.2"
+thiserror = "2"
+
+[dev-dependencies]
+rand = "0.8"
+tempfile = "3"

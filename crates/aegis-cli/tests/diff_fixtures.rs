@@ -6,6 +6,7 @@ use aegis_cargo::{build_snapshot, MetadataOptions};
 use aegis_core::diff::ChangeKind;
 use aegis_core::model::{DependencySnapshot, PackageKey, PackageNode};
 use aegis_core::pipeline;
+use aegis_policy::parse_policy;
 use semver::Version;
 
 fn fixture_dir(name: &str) -> PathBuf {
@@ -148,4 +149,214 @@ fn mutated_snapshots_produce_minor_upgrade_and_source_mutation() {
         "registry"
     );
     assert_eq!(mutation.after.as_ref().unwrap().source_family(), "git");
+}
+
+#[test]
+fn critical_path_rule_fires_when_change_reaches_critical_member() {
+    let snapshot = snapshot_of("critical-path-workspace");
+
+    let current = semver_key(&snapshot);
+    let bumped = PackageKey {
+        version: Version::new(1, 1, 0),
+        ..current.clone()
+    };
+    let head = substituted(&snapshot, &current, &bumped);
+
+    let policy = aegis_policy::parse_policy(
+        "schema_version: 1\n\
+         critical_packages:\n  - critical-app\nthresholds:\n  warn_at: 30\n  high_at: 60\n  block_at: 80\nrules:\n  - id: critical-path-touched\n    when:\n      touches_critical: true\n    action: warn\n    message: \"change reaches a critical path\"\n",
+    )
+    .expect("policy parses");
+
+    let report = aegis_core::run_decision(
+        &snapshot,
+        &head,
+        Some(&policy),
+        &Default::default(),
+        None,
+        None,
+    );
+
+    let decision = report
+        .decisions
+        .iter()
+        .find(|decision| decision.change.name == "semver")
+        .expect("semver decision present");
+    assert!(
+        decision
+            .matched_rules
+            .contains(&"critical-path-touched".to_string()),
+        "rule touching critical path should fire"
+    );
+    assert_eq!(decision.status.label(), "warn");
+}
+
+#[test]
+fn renamed_source_mutation_via_cross_family_pairing() {
+    let snapshot = snapshot_of("renamed-dependency-workspace");
+
+    let current = semver_key(&snapshot);
+    let git = PackageKey {
+        source: Some("git+https://example.com/semver.git".to_string()),
+        ..current.clone()
+    };
+    let head = substituted(&snapshot, &current, &git);
+
+    let report = pipeline::run_diff(&snapshot, &head);
+    let change = report
+        .changes
+        .iter()
+        .find(|change| change.name == "semver")
+        .expect("semver change present");
+    assert_eq!(change.kind, ChangeKind::SourceMutation);
+    assert_eq!(change.before.as_ref().unwrap().source_family(), "registry");
+    assert_eq!(change.after.as_ref().unwrap().source_family(), "git");
+}
+
+#[test]
+fn scan_command_runs_on_fixture_without_policy() {
+    let dir = fixture_dir("basic-workspace");
+    ensure_lockfile(&dir);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aegis"))
+        .arg("scan")
+        .arg("--manifest-path")
+        .arg(dir.join("Cargo.toml"))
+        .arg("--format")
+        .arg("json")
+        .output()
+        .expect("spawn aegis scan");
+
+    assert!(
+        output.status.success(),
+        "scan should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("schema_version"),
+        "scan should emit a JSON report"
+    );
+}
+
+struct FixedAdvisory(f64);
+
+impl aegis_core::AdvisorySource for FixedAdvisory {
+    fn severity_for(&self, _name: &str, _version: &semver::Version) -> Option<f64> {
+        Some(self.0)
+    }
+}
+
+#[test]
+fn advisory_finding_raises_risk_score() {
+    let basic = snapshot_of("basic-workspace");
+    let current = semver_key(&basic);
+    let bumped = PackageKey {
+        version: Version::new(1, 1, 0),
+        ..current.clone()
+    };
+    let head = substituted(&basic, &current, &bumped);
+
+    let policy = parse_policy(
+        "schema_version: 1\nthresholds:\n  warn_at: 30\n  high_at: 60\n  block_at: 80\nrules: []\n",
+    )
+    .expect("policy parses");
+
+    let without = aegis_core::run_decision(
+        &basic,
+        &head,
+        Some(&policy),
+        &Default::default(),
+        None,
+        None,
+    );
+    let with = aegis_core::run_decision(
+        &basic,
+        &head,
+        Some(&policy),
+        &Default::default(),
+        Some(&FixedAdvisory(1.0)),
+        None,
+    );
+
+    let score_without = without
+        .decisions
+        .iter()
+        .find(|decision| decision.change.name == "semver")
+        .expect("semver decision")
+        .score;
+    let score_with = with
+        .decisions
+        .iter()
+        .find(|decision| decision.change.name == "semver")
+        .expect("semver decision")
+        .score;
+
+    assert!(
+        score_with > score_without,
+        "advisory should raise the risk score: {score_with} <= {score_without}"
+    );
+}
+
+struct FixedProvenance(bool);
+
+impl aegis_core::ProvenanceSource for FixedProvenance {
+    fn has_provenance(&self, _name: &str, _version: &semver::Version) -> bool {
+        self.0
+    }
+}
+
+#[test]
+fn provenance_verification_lowers_evidence_gap() {
+    let snapshot = snapshot_of("critical-path-workspace");
+    let current = semver_key(&snapshot);
+    let bumped = PackageKey {
+        version: Version::new(1, 1, 0),
+        ..current.clone()
+    };
+    let head = substituted(&snapshot, &current, &bumped);
+
+    let policy = parse_policy(
+        "schema_version: 1\n\
+         critical_packages:\n  - critical-app\n\
+         thresholds:\n  warn_at: 30\n  high_at: 60\n  block_at: 80\n\
+         evidence:\n  require_for_critical_path:\n    - provenance\n\
+         rules: []\n",
+    )
+    .expect("policy parses");
+
+    let without = aegis_core::run_decision(
+        &snapshot,
+        &head,
+        Some(&policy),
+        &Default::default(),
+        None,
+        None,
+    );
+    let with = aegis_core::run_decision(
+        &snapshot,
+        &head,
+        Some(&policy),
+        &Default::default(),
+        None,
+        Some(&FixedProvenance(true)),
+    );
+
+    let score_without = without
+        .decisions
+        .iter()
+        .find(|decision| decision.change.name == "semver")
+        .expect("semver decision")
+        .score;
+    let score_with = with
+        .decisions
+        .iter()
+        .find(|decision| decision.change.name == "semver")
+        .expect("semver decision")
+        .score;
+
+    assert!(
+        score_with < score_without,
+        "verified provenance should lower the risk score: {score_with} >= {score_without}"
+    );
 }

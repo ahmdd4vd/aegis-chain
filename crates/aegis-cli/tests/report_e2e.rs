@@ -56,7 +56,7 @@ fn fixture_diff_renders_markdown_and_sarif_end_to_end() {
     let policy = parse_policy(POLICY_YAML).expect("policy parses");
     let evidence = EvidenceAvailability::default();
 
-    let report = run_decision(&base, &head, Some(&policy), &evidence);
+    let report = run_decision(&base, &head, Some(&policy), &evidence, None, None);
 
     assert!(report.policy.as_ref().is_some());
     assert_eq!(

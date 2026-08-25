@@ -1,0 +1,8 @@
+[package]
+name = "critical-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+critical-lib = { path = "../lib" }
+semver = "1"

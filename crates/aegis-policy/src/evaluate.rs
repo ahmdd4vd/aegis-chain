@@ -131,6 +131,8 @@ fn evidence_label(kind: EvidenceKind) -> &'static str {
         EvidenceKind::Provenance => "provenance",
         EvidenceKind::ApprovedSource => "approved_source",
         EvidenceKind::VulnerabilityFeed => "vulnerability_feed",
+        EvidenceKind::Hashes => "hashes",
+        EvidenceKind::License => "license",
     }
 }
 

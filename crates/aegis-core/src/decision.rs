@@ -1,3 +1,5 @@
+use crate::advisory::AdvisorySource;
+use crate::provenance::ProvenanceSource;
 use aegis_graph::analyze_impact;
 use aegis_policy::{
     compute_score, decide as decide_action, required_evidence_for, run_rules, score_level, Action,
@@ -43,6 +45,8 @@ pub fn run_decision(
     head: &DependencySnapshot,
     policy: Option<&Policy>,
     evidence: &EvidenceAvailability,
+    advisory: Option<&dyn AdvisorySource>,
+    provenance: Option<&dyn ProvenanceSource>,
 ) -> DecisionReport {
     let diff = pipeline::run_diff(base, head);
 
@@ -84,7 +88,12 @@ pub fn run_decision(
         });
 
         let required = required_evidence_for(&policy.evidence, is_added, touches_critical);
-        let available = evidence.get(&change.name).cloned().unwrap_or_default();
+        let mut available = evidence.get(&change.name).cloned().unwrap_or_default();
+        if let Some(provenance) = provenance {
+            if provenance.has_provenance(&change.name, &changed_key.version) {
+                available.insert(aegis_policy::EvidenceKind::Provenance);
+            }
+        }
         let missing = required
             .iter()
             .filter(|kind| !available.contains(kind))
@@ -119,7 +128,7 @@ pub fn run_decision(
             proximity,
             critical: if touches_critical { 1.0 } else { 0.0 },
             evidence_gap,
-            findings: 0.0,
+            findings: advisory_severity(change, advisory),
         };
         let score = compute_score(&components);
 
@@ -175,4 +184,19 @@ fn magnitude_of(kind: ChangeKind) -> f64 {
         ChangeKind::SourceMutation => 0.90,
         ChangeKind::Added | ChangeKind::Removed | ChangeKind::Downgrade => 0.60,
     }
+}
+
+fn advisory_severity(change: &PackageChange, advisory: Option<&dyn AdvisorySource>) -> f64 {
+    let Some(advisory) = advisory else {
+        return 0.0;
+    };
+    let Some(version) = change
+        .after
+        .as_ref()
+        .or(change.before.as_ref())
+        .map(|key| &key.version)
+    else {
+        return 0.0;
+    };
+    advisory.severity_for(&change.name, version).unwrap_or(0.0)
 }
